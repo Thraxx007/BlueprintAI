@@ -19,7 +19,11 @@ RUN mkdir -p public
 
 ENV NEXT_TELEMETRY_DISABLED 1
 
-RUN npm run build
+# Force rebuild with API URL from build args
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+
+RUN echo "Building with API URL: $NEXT_PUBLIC_API_URL" && npm run build
 
 # Production image, copy all the files and run next
 FROM base AS runner
