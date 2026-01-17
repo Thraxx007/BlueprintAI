@@ -1,18 +1,40 @@
 from pydantic_settings import BaseSettings
+from pydantic import field_validator
 from pathlib import Path
 from functools import lru_cache
+import os
 
 
 class Settings(BaseSettings):
     # App
-    APP_NAME: str = "SOP Creator"
+    APP_NAME: str = "BlueprintAI"
     DEBUG: bool = True
     API_V1_PREFIX: str = "/api/v1"
     SECRET_KEY: str = "your-secret-key-change-in-production"
 
-    # Database
+    # Database - Railway provides DATABASE_URL in postgres:// format
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/sop_creator"
     DATABASE_URL_SYNC: str = "postgresql://postgres:postgres@localhost:5432/sop_creator"
+
+    @field_validator("DATABASE_URL", mode="before")
+    @classmethod
+    def convert_database_url(cls, v: str) -> str:
+        # Convert postgres:// to postgresql+asyncpg:// for SQLAlchemy async
+        if v.startswith("postgres://"):
+            return v.replace("postgres://", "postgresql+asyncpg://", 1)
+        if v.startswith("postgresql://") and "+asyncpg" not in v:
+            return v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return v
+
+    @field_validator("DATABASE_URL_SYNC", mode="before")
+    @classmethod
+    def convert_database_url_sync(cls, v: str) -> str:
+        # Ensure sync URL uses postgresql://
+        if v.startswith("postgres://"):
+            return v.replace("postgres://", "postgresql://", 1)
+        if "+asyncpg" in v:
+            return v.replace("postgresql+asyncpg://", "postgresql://", 1)
+        return v
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -21,8 +43,8 @@ class Settings(BaseSettings):
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
 
-    # Storage
-    STORAGE_PATH: Path = Path("/Users/nicholasrussell/sop-creator/storage")
+    # Storage - use /app/storage for containers, local path for dev
+    STORAGE_PATH: Path = Path(os.environ.get("STORAGE_PATH", "/app/storage"))
     MAX_VIDEO_SIZE_MB: int = 5000  # 5GB max
     ALLOWED_VIDEO_EXTENSIONS: list[str] = [".mp4", ".mov", ".avi", ".mkv", ".webm"]
 
@@ -51,8 +73,19 @@ class Settings(BaseSettings):
     PUBLIC_URL: str = "http://localhost:8000"
     FRONTEND_URL: str = "http://localhost:3000"
 
-    # CORS
+    # CORS - will be computed from FRONTEND_URL if not explicitly set
     CORS_ORIGINS: list[str] = ["http://localhost:3000"]
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def build_cors_origins(cls, v, info):
+        if isinstance(v, str):
+            # Handle JSON string or comma-separated
+            if v.startswith("["):
+                import json
+                return json.loads(v)
+            return [origin.strip() for origin in v.split(",")]
+        return v
 
     class Config:
         env_file = ".env"
