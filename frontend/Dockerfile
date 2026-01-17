@@ -38,6 +38,7 @@ USER nextjs
 
 EXPOSE 3000
 
-ENV PORT 3000
+ENV PORT=3000
 
-CMD ["node", "server.js"]
+# Use dynamic PORT for Railway
+CMD node server.js
