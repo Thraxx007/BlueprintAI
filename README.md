@@ -1,26 +1,41 @@
-# SOP Creator
+# BlueprintAI
 
-An automatic Standard Operating Procedure (SOP) creation tool powered by Claude AI. Upload screen recordings and automatically generate step-by-step documentation with screenshots and click markers.
+An AI-powered technical documentation and Standard Operating Procedure (SOP) creation tool. Upload screen recordings or audio files and automatically generate step-by-step blueprints with screenshots and annotations.
 
 ## Features
 
+### Input Methods
 - **Video Upload**: Upload screen recordings (MP4, MOV, AVI, MKV, WebM up to 5GB)
-- **AI-Powered Analysis**: Claude AI automatically detects UI changes, clicks, and actions
-- **Step-by-Step SOPs**: Generate professional documentation with:
-  - Screenshots at each step
+- **Audio Upload**: Upload audio recordings (MP3, WAV, M4A, OGG, FLAC) for voice-narrated SOPs
+- **Full-Day Recording Support**: Upload long recordings and automatically split into multiple blueprints
+- **Video Segment Selection**: Manually select specific portions of videos for targeted blueprint creation
+
+### AI-Powered Analysis
+- **Automatic Scene Detection**: Detects UI changes, clicks, and actions in video recordings
+- **Audio Transcription**: Transcribes audio recordings using OpenAI Whisper
+- **Smart Step Generation**: Claude AI generates professional documentation with:
+  - Screenshots at each step (for video)
   - Detailed step descriptions
   - Click markers showing where to click
-- **Export Options**: Export to Google Docs or Notion with full formatting
-- **Full-Day Recording Support**: Upload long recordings and automatically split into multiple SOPs
-- **Video Chopping**: Manually split videos into segments for targeted SOP creation
+  - Contextual instructions based on audio narration
+
+### Export Options
+- **PDF Export**: Export blueprints as professionally formatted PDF documents with embedded images
+- **Notion Export**: Export directly to Notion with full formatting, images, and structured content
+
+### User Experience
+- **Blueprint-Themed UI**: Tech-forward design with light and dark mode support
+- **Real-Time Progress**: Track processing and generation progress with detailed status updates
+- **Step Editor**: Review and edit generated steps, update descriptions, and modify annotations
 
 ## Tech Stack
 
 - **Frontend**: Next.js 14, TypeScript, Tailwind CSS, shadcn/ui
 - **Backend**: Python FastAPI, Celery, Redis
 - **Database**: PostgreSQL
-- **AI**: Claude API (Haiku for vision, Sonnet for descriptions)
+- **AI**: Claude API (Haiku for vision analysis, Sonnet for descriptions), OpenAI Whisper for transcription
 - **Video Processing**: FFmpeg, PySceneDetect
+- **PDF Generation**: ReportLab
 
 ## Quick Start
 
@@ -28,22 +43,23 @@ An automatic Standard Operating Procedure (SOP) creation tool powered by Claude 
 
 - Docker and Docker Compose
 - Anthropic API key
-- (Optional) Google OAuth credentials for Google Docs export
+- OpenAI API key (for audio transcription)
 - (Optional) Notion OAuth credentials for Notion export
 
 ### Setup
 
-1. Clone the repository and navigate to the project directory:
+1. Clone the repository:
 
 ```bash
-cd sop-creator
+git clone https://github.com/Thraxx007/BlueprintAI.git
+cd BlueprintAI
 ```
 
 2. Copy the environment file and add your API keys:
 
 ```bash
 cp .env.example .env
-# Edit .env and add your ANTHROPIC_API_KEY
+# Edit .env and add your API keys
 ```
 
 3. Start the application with Docker Compose:
@@ -92,38 +108,47 @@ npm run dev
 
 ## Usage
 
-### 1. Upload a Video
+### 1. Upload Content
 
+#### Video Upload
 Navigate to Videos → Upload and drag your screen recording. The video will be processed to:
 - Extract metadata (duration, resolution, FPS)
 - Detect scene changes
 - Extract frames at key moments
 
-### 2. Create an SOP
+#### Audio Upload
+Navigate to Audio → Upload and drag your audio recording. The audio will be:
+- Transcribed using OpenAI Whisper
+- Analyzed for step-by-step instructions
+- Ready for blueprint generation
 
-1. Go to SOPs → Create SOP
-2. Select a processed video
+### 2. Create a Blueprint
+
+1. Go to Blueprints → Create Blueprint
+2. Select a processed video or audio file
 3. Enter a title and description
-4. Provide context for the AI (what the video demonstrates)
-5. Click "Generate SOP"
+4. Provide context for the AI (what the recording demonstrates)
+5. Click "Generate Blueprint"
 
-The AI will analyze the video frames and generate:
+The AI will analyze the content and generate:
 - Step-by-step instructions
-- Screenshots for each step
+- Screenshots for each step (video only)
 - Click markers showing where actions occurred
+- Contextual descriptions based on narration
 
 ### 3. Review and Edit
 
-View your generated SOP and make edits:
+View your generated blueprint and make edits:
 - Update step descriptions
 - Add or remove click annotations
 - Reorder steps
+- Modify titles and context
 
 ### 4. Export
 
-Export your SOP to:
-- **Google Docs**: Creates a formatted document with images
-- **Notion**: Creates a page with rich formatting
+Export your blueprint to:
+- **PDF**: Creates a professionally formatted PDF document with embedded images and structured content
+- **Notion**: Creates a Notion page with rich formatting, images, and organized steps
 
 ## Configuration
 
@@ -131,31 +156,53 @@ Export your SOP to:
 
 | Variable | Description | Required |
 |----------|-------------|----------|
-| `ANTHROPIC_API_KEY` | Claude API key | Yes |
-| `SECRET_KEY` | Backend secret for JWT | Yes |
+| `ANTHROPIC_API_KEY` | Claude API key for AI analysis | Yes |
+| `OPENAI_API_KEY` | OpenAI API key for audio transcription | Yes |
+| `SECRET_KEY` | Backend secret for JWT authentication | Yes |
 | `NEXTAUTH_SECRET` | Frontend auth secret | Yes |
-| `GOOGLE_CLIENT_ID` | Google OAuth client ID | For Google export |
-| `GOOGLE_CLIENT_SECRET` | Google OAuth secret | For Google export |
 | `NOTION_CLIENT_ID` | Notion OAuth client ID | For Notion export |
 | `NOTION_CLIENT_SECRET` | Notion OAuth secret | For Notion export |
 
-### Video Processing Options
+### Processing Options
 
 - **Frame Sampling**: `scene_changes` (default), `fixed_interval`, `adaptive`
 - **Detail Level**: `brief`, `detailed`, `comprehensive`
-- **Max Steps**: Configure maximum steps per SOP (default: 50)
+- **Max Steps**: Configure maximum steps per blueprint (default: 50)
 
 ## API Documentation
 
 Once the backend is running, visit http://localhost:8000/docs for interactive API documentation.
 
 Key endpoints:
+
+### Videos
 - `POST /api/v1/videos/upload` - Upload video
 - `POST /api/v1/videos/{id}/process` - Process video
-- `POST /api/v1/sops` - Create SOP
-- `POST /api/v1/sops/{id}/generate` - Generate SOP steps
-- `POST /api/v1/exports/google-docs` - Export to Google Docs
+- `GET /api/v1/videos` - List all videos
+- `GET /api/v1/videos/{id}` - Get video details
+
+### Audio
+- `POST /api/v1/audio/upload` - Upload audio file
+- `POST /api/v1/audio/{id}/transcribe` - Transcribe audio
+- `GET /api/v1/audio` - List all audio files
+- `GET /api/v1/audio/{id}` - Get audio details
+
+### Blueprints (SOPs)
+- `POST /api/v1/sops` - Create blueprint
+- `POST /api/v1/sops/{id}/generate` - Generate blueprint steps
+- `GET /api/v1/sops` - List all blueprints
+- `GET /api/v1/sops/{id}` - Get blueprint details
+- `PUT /api/v1/sops/{id}` - Update blueprint
+
+### Exports
+- `POST /api/v1/exports/pdf` - Export to PDF
 - `POST /api/v1/exports/notion` - Export to Notion
+- `GET /api/v1/exports` - List all exports
+- `GET /api/v1/exports/{id}/download` - Download export file
+
+### Integrations
+- `GET /api/v1/integrations/notion/status` - Check Notion connection status
+- `DELETE /api/v1/integrations/notion` - Disconnect Notion
 
 ## Architecture
 
@@ -168,9 +215,23 @@ Key endpoints:
                                ▼                        ▼
                         ┌─────────────────┐     ┌─────────────────┐
                         │   PostgreSQL    │     │   Claude AI     │
-                        │   + Redis       │     │   API           │
+                        │   + Redis       │     │   + Whisper     │
                         └─────────────────┘     └─────────────────┘
 ```
+
+## Screenshots
+
+### Landing Page
+The blueprint-themed landing page with light and dark mode support.
+
+### Dashboard
+Manage your videos, audio files, and blueprints from the sidebar navigation.
+
+### Blueprint Editor
+Review and edit generated steps with inline editing capabilities.
+
+### Export Options
+Export to PDF or Notion with a single click.
 
 ## Contributing
 
