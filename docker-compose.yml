@@ -1,0 +1,106 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: sop-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: sop_creator
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: sop-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: sop-backend
+    environment:
+      - DEBUG=true
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-me}
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/sop_creator
+      - DATABASE_URL_SYNC=postgresql://postgres:postgres@postgres:5432/sop_creator
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - STORAGE_PATH=/app/storage
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - NOTION_CLIENT_ID=${NOTION_CLIENT_ID}
+      - NOTION_CLIENT_SECRET=${NOTION_CLIENT_SECRET}
+      - PUBLIC_URL=http://localhost:8000
+      - FRONTEND_URL=http://localhost:3000
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: sop-celery-worker
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
+    environment:
+      - DEBUG=true
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/sop_creator
+      - DATABASE_URL_SYNC=postgresql://postgres:postgres@postgres:5432/sop_creator
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - STORAGE_PATH=/app/storage
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+      - NOTION_CLIENT_ID=${NOTION_CLIENT_ID}
+      - NOTION_CLIENT_SECRET=${NOTION_CLIENT_SECRET}
+    volumes:
+      - ./storage:/app/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: sop-frontend
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXTAUTH_URL=http://localhost:3000
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-nextauth-secret-change-me}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  redis_data:

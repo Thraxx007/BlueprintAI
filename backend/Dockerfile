@@ -1,0 +1,29 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libpq-dev \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+COPY pyproject.toml ./
+RUN pip install poetry && \
+    poetry config virtualenvs.create false && \
+    poetry install --only main --no-root --no-interaction --no-ansi
+
+# Copy application
+COPY . .
+
+# Create storage directories
+RUN mkdir -p /app/storage/videos /app/storage/frames /app/storage/thumbnails /app/storage/exports /app/storage/annotated /app/storage/audio
+
+# Create cache directory for Whisper models
+RUN mkdir -p /root/.cache/whisper
+
+EXPOSE 8000
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
