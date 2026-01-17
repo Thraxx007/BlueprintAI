@@ -14,11 +14,13 @@ class Settings(BaseSettings):
 
     # Database - Railway provides DATABASE_URL in postgres:// format
     DATABASE_URL: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/sop_creator"
-    DATABASE_URL_SYNC: str = "postgresql://postgres:postgres@localhost:5432/sop_creator"
+    DATABASE_URL_SYNC: str = ""  # Will be derived from DATABASE_URL if not set
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
     def convert_database_url(cls, v: str) -> str:
+        if not v:
+            return "postgresql+asyncpg://postgres:postgres@localhost:5432/sop_creator"
         # Convert postgres:// to postgresql+asyncpg:// for SQLAlchemy async
         if v.startswith("postgres://"):
             return v.replace("postgres://", "postgresql+asyncpg://", 1)
@@ -28,7 +30,16 @@ class Settings(BaseSettings):
 
     @field_validator("DATABASE_URL_SYNC", mode="before")
     @classmethod
-    def convert_database_url_sync(cls, v: str) -> str:
+    def convert_database_url_sync(cls, v: str, info) -> str:
+        # If DATABASE_URL_SYNC is not set, derive from DATABASE_URL
+        if not v:
+            db_url = os.environ.get("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/sop_creator")
+            # Convert to sync format
+            if db_url.startswith("postgres://"):
+                return db_url.replace("postgres://", "postgresql://", 1)
+            if "+asyncpg" in db_url:
+                return db_url.replace("postgresql+asyncpg://", "postgresql://", 1)
+            return db_url
         # Ensure sync URL uses postgresql://
         if v.startswith("postgres://"):
             return v.replace("postgres://", "postgresql://", 1)
@@ -39,9 +50,23 @@ class Settings(BaseSettings):
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
 
-    # Celery
-    CELERY_BROKER_URL: str = "redis://localhost:6379/0"
-    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/0"
+    # Celery - defaults to REDIS_URL if not explicitly set
+    CELERY_BROKER_URL: str = ""
+    CELERY_RESULT_BACKEND: str = ""
+
+    @field_validator("CELERY_BROKER_URL", mode="before")
+    @classmethod
+    def set_celery_broker(cls, v: str) -> str:
+        if not v:
+            return os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+        return v
+
+    @field_validator("CELERY_RESULT_BACKEND", mode="before")
+    @classmethod
+    def set_celery_backend(cls, v: str) -> str:
+        if not v:
+            return os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+        return v
 
     # Storage - use /app/storage for containers, local path for dev
     STORAGE_PATH: Path = Path(os.environ.get("STORAGE_PATH", "/app/storage"))
