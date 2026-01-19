@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
@@ -11,8 +12,10 @@ import type { AudioSOP } from '@/types';
 import { Plus, Trash2, Mic, FileText, Loader2 } from 'lucide-react';
 
 export default function AudioPage() {
+  const router = useRouter();
   const [audioSOPs, setAudioSOPs] = useState<AudioSOP[]>([]);
   const [loading, setLoading] = useState(true);
+  const [generatingId, setGeneratingId] = useState<string | null>(null);
 
   useEffect(() => {
     loadAudioSOPs();
@@ -36,6 +39,17 @@ export default function AudioPage() {
       loadAudioSOPs();
     } catch (error) {
       console.error('Failed to delete audio SOP:', error);
+    }
+  };
+
+  const handleGenerate = async (sopId: string) => {
+    setGeneratingId(sopId);
+    try {
+      await audioApi.generate(sopId);
+      router.push(`/sops/${sopId}`);
+    } catch (error) {
+      console.error('Failed to generate SOP:', error);
+      setGeneratingId(null);
     }
   };
 
@@ -133,12 +147,19 @@ export default function AudioPage() {
                   </div>
                   <div className="flex items-center space-x-2">
                     {audioSOP.status === 'pending_audio' && (
-                      <Link href={`/audio/${audioSOP.id}/generate`}>
-                        <Button variant="outline" size="sm">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleGenerate(audioSOP.id)}
+                        disabled={generatingId === audioSOP.id}
+                      >
+                        {generatingId === audioSOP.id ? (
+                          <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                        ) : (
                           <FileText className="h-4 w-4 mr-1" />
-                          Generate SOP
-                        </Button>
-                      </Link>
+                        )}
+                        {generatingId === audioSOP.id ? 'Starting...' : 'Generate SOP'}
+                      </Button>
                     )}
                     {(audioSOP.status === 'generated' || audioSOP.status === 'completed') && (
                       <Link href={`/sops/${audioSOP.id}`}>
