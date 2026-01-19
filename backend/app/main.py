@@ -106,8 +106,11 @@ async def health_check():
 @app.get("/debug/cors")
 async def debug_cors():
     """Debug endpoint to check CORS configuration."""
+    import os
     return {
         "cors_origins": settings.CORS_ORIGINS,
         "frontend_url": settings.FRONTEND_URL,
         "public_url": settings.PUBLIC_URL,
+        "env_CORS_ORIGINS": os.environ.get("CORS_ORIGINS", "NOT SET"),
+        "env_FRONTEND_URL": os.environ.get("FRONTEND_URL", "NOT SET"),
     }
