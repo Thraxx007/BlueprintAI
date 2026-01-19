@@ -79,6 +79,80 @@ module.exports = {
       boxShadow: {
         'blueprint': '0 0 20px -5px hsl(var(--blueprint-line) / 0.5)',
         'blueprint-lg': '0 0 30px -5px hsl(var(--blueprint-line) / 0.6)',
+        'glow': '0 0 20px rgba(34, 211, 238, 0.3)',
+        'glow-lg': '0 0 40px rgba(34, 211, 238, 0.4)',
+        'glow-xl': '0 0 60px rgba(34, 211, 238, 0.5)',
+      },
+      keyframes: {
+        'fade-in': {
+          '0%': { opacity: '0' },
+          '100%': { opacity: '1' },
+        },
+        'fade-in-up': {
+          '0%': { opacity: '0', transform: 'translateY(20px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        'fade-in-down': {
+          '0%': { opacity: '0', transform: 'translateY(-20px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+        'slide-in-left': {
+          '0%': { opacity: '0', transform: 'translateX(-20px)' },
+          '100%': { opacity: '1', transform: 'translateX(0)' },
+        },
+        'slide-in-right': {
+          '0%': { opacity: '0', transform: 'translateX(20px)' },
+          '100%': { opacity: '1', transform: 'translateX(0)' },
+        },
+        'scale-in': {
+          '0%': { opacity: '0', transform: 'scale(0.95)' },
+          '100%': { opacity: '1', transform: 'scale(1)' },
+        },
+        'bounce-in': {
+          '0%': { opacity: '0', transform: 'scale(0.3)' },
+          '50%': { transform: 'scale(1.05)' },
+          '70%': { transform: 'scale(0.9)' },
+          '100%': { opacity: '1', transform: 'scale(1)' },
+        },
+        'shimmer': {
+          '0%': { transform: 'translateX(-100%)' },
+          '100%': { transform: 'translateX(100%)' },
+        },
+        'pulse-glow': {
+          '0%, 100%': { boxShadow: '0 0 20px rgba(34, 211, 238, 0.3)' },
+          '50%': { boxShadow: '0 0 40px rgba(34, 211, 238, 0.6)' },
+        },
+        'float': {
+          '0%, 100%': { transform: 'translateY(0)' },
+          '50%': { transform: 'translateY(-10px)' },
+        },
+        'ripple': {
+          '0%': { transform: 'scale(0)', opacity: '1' },
+          '100%': { transform: 'scale(4)', opacity: '0' },
+        },
+        'blueprint-pulse': {
+          '0%, 100%': { opacity: '1' },
+          '50%': { opacity: '0.5' },
+        },
+        'grid-flow': {
+          '0%': { backgroundPosition: '0 0' },
+          '100%': { backgroundPosition: '50px 50px' },
+        },
+      },
+      animation: {
+        'fade-in': 'fade-in 0.5s ease-out',
+        'fade-in-up': 'fade-in-up 0.5s ease-out',
+        'fade-in-down': 'fade-in-down 0.5s ease-out',
+        'slide-in-left': 'slide-in-left 0.5s ease-out',
+        'slide-in-right': 'slide-in-right 0.5s ease-out',
+        'scale-in': 'scale-in 0.4s ease-out',
+        'bounce-in': 'bounce-in 0.6s ease-out',
+        'shimmer': 'shimmer 1.5s infinite',
+        'pulse-glow': 'pulse-glow 2s ease-in-out infinite',
+        'float': 'float 3s ease-in-out infinite',
+        'ripple': 'ripple 0.6s linear',
+        'blueprint-pulse': 'blueprint-pulse 2s ease-in-out infinite',
+        'grid-flow': 'grid-flow 20s linear infinite',
       },
     },
   },
