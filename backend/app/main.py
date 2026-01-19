@@ -101,3 +101,13 @@ async def root():
 async def health_check():
     """Health check endpoint for Railway/container orchestration."""
     return {"status": "healthy", "app": settings.APP_NAME}
+
+
+@app.get("/debug/cors")
+async def debug_cors():
+    """Debug endpoint to check CORS configuration."""
+    return {
+        "cors_origins": settings.CORS_ORIGINS,
+        "frontend_url": settings.FRONTEND_URL,
+        "public_url": settings.PUBLIC_URL,
+    }
