@@ -152,6 +152,23 @@ export interface AudioSOP {
   original_filename: string | null;
   file_size: number | null;
   total_steps: number;
+  audio_file_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AudioFile {
+  id: string;
+  filename: string;
+  original_filename: string;
+  file_size: number;
+  duration_seconds: number | null;
+  mime_type: string | null;
+  transcript: string | null;
+  detected_language: string | null;
+  transcription_status: 'pending' | 'transcribing' | 'transcribed' | 'error';
+  sop_count: number;
+  upload_date: string;
   created_at: string;
   updated_at: string;
 }

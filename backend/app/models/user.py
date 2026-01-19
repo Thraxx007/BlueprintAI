@@ -27,6 +27,7 @@ class User(Base):
     accounts: Mapped[list["Account"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     sessions: Mapped[list["Session"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     videos: Mapped[list["Video"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    audio_files: Mapped[list["AudioFile"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     sops: Mapped[list["SOP"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     exports: Mapped[list["Export"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     integrations: Mapped[list["UserIntegration"]] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -73,6 +74,7 @@ class Session(Base):
 
 # Forward references
 from app.models.video import Video
+from app.models.audio import AudioFile
 from app.models.sop import SOP
 from app.models.export import Export, UserIntegration
 from app.models.job import ProcessingJob

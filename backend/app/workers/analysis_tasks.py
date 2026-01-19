@@ -59,23 +59,35 @@ def generate_sop_task(self, sop_id: str, user_id: str, options: dict):
 
         # Get frames for analysis
         update_job_progress(job_id, 10, "Loading frames...")
-        frames_query = db.query(Frame).filter(Frame.video_id == sop.video_id)
 
-        # Filter by timeframe if specified
-        if sop.start_time is not None:
-            frames_query = frames_query.filter(
-                Frame.timestamp_ms >= int(sop.start_time * 1000)
-            )
-        if sop.end_time is not None:
-            frames_query = frames_query.filter(
-                Frame.timestamp_ms <= int(sop.end_time * 1000)
-            )
+        # Build base query with timeframe filter
+        def build_frames_query(scene_changes_only=False):
+            query = db.query(Frame).filter(Frame.video_id == sop.video_id)
 
-        # Get scene change frames or sample based on strategy
+            # Filter by timeframe if specified
+            if sop.start_time is not None:
+                query = query.filter(
+                    Frame.timestamp_ms >= int(sop.start_time * 1000)
+                )
+            if sop.end_time is not None:
+                query = query.filter(
+                    Frame.timestamp_ms <= int(sop.end_time * 1000)
+                )
+
+            if scene_changes_only:
+                query = query.filter(Frame.is_scene_change == True)
+
+            return query.order_by(Frame.frame_number)
+
+        frames = []
+
+        # Try scene change frames first if that's the strategy
         if options.get("frame_sampling_strategy") == "scene_changes":
-            frames_query = frames_query.filter(Frame.is_scene_change == True)
+            frames = build_frames_query(scene_changes_only=True).all()
 
-        frames = frames_query.order_by(Frame.frame_number).all()
+        # Fall back to all frames if no scene change frames found in range
+        if not frames:
+            frames = build_frames_query(scene_changes_only=False).all()
 
         if not frames:
             raise ValueError("No frames found for analysis")
@@ -112,11 +124,23 @@ def generate_sop_task(self, sop_id: str, user_id: str, options: dict):
                 previous_steps=all_steps[-5:] if all_steps else None,
             )
 
-            # Map steps to frames
+            # Map steps to frames with validation
             for step in steps:
                 frame_idx = step.get("frame_index", 0)
-                if frame_idx < len(batch_frames):
+
+                # Validate frame_index is within batch bounds
+                if not isinstance(frame_idx, int):
+                    try:
+                        frame_idx = int(frame_idx)
+                    except (ValueError, TypeError):
+                        frame_idx = 0
+
+                # Clamp to valid range
+                frame_idx = max(0, min(frame_idx, len(batch_frames) - 1))
+
+                if batch_frames:
                     step["frame"] = batch_frames[frame_idx]
+                    step["frame_index"] = frame_idx  # Store validated index
 
             all_steps.extend(steps)
 
@@ -144,12 +168,21 @@ def generate_sop_task(self, sop_id: str, user_id: str, options: dict):
             # Add click annotations
             click_loc = step_data.get("click_location")
             if click_loc and frame:
+                # Validate and clamp percentages to 0-100 range
+                x_pct = click_loc.get("x_percentage", 50)
+                y_pct = click_loc.get("y_percentage", 50)
+                try:
+                    x_pct = max(0, min(100, float(x_pct)))
+                    y_pct = max(0, min(100, float(y_pct)))
+                except (ValueError, TypeError):
+                    x_pct, y_pct = 50, 50
+
                 annotation = ClickAnnotation(
                     step_id=sop_step.id,
-                    x_coordinate=int(click_loc.get("x_percentage", 50) * frame.width / 100) if frame.width else 0,
-                    y_coordinate=int(click_loc.get("y_percentage", 50) * frame.height / 100) if frame.height else 0,
-                    x_percentage=click_loc.get("x_percentage", 50),
-                    y_percentage=click_loc.get("y_percentage", 50),
+                    x_coordinate=int(x_pct * frame.width / 100) if frame.width else 0,
+                    y_coordinate=int(y_pct * frame.height / 100) if frame.height else 0,
+                    x_percentage=x_pct,
+                    y_percentage=y_pct,
                     click_type=click_loc.get("click_type", "left_click"),
                     element_description=click_loc.get("element_description"),
                     action_description=click_loc.get("action_description"),

@@ -74,9 +74,18 @@ class VideoListResponse(BaseModel):
     page_size: int
 
 
+class SegmentDefinition(BaseModel):
+    """Definition for a single video segment."""
+    start_time: float
+    end_time: float
+    title: str | None = None
+    label: str | None = None  # Alias for title, used by frontend
+    color: str | None = None  # UI color hint
+
+
 class VideoChopRequest(BaseModel):
-    segments: list[dict]
-    # Each segment: {"start_time": float, "end_time": float, "title": str | None}
+    """Request to create multiple segments on a video."""
+    segments: list[SegmentDefinition]
 
 
 class VideoProcessRequest(BaseModel):

@@ -1,13 +1,22 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { videosApi, jobsApi } from '@/lib/api';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { videosApi, sopsApi } from '@/lib/api';
 import { formatFileSize, formatDuration } from '@/lib/utils';
+import { MultiSegmentSelector, VideoSegment } from '@/components/video/MultiSegmentSelector';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog';
 import {
   ArrowLeft,
   Play,
@@ -18,11 +27,14 @@ import {
   CheckCircle,
   AlertCircle,
   FileText,
-  Image as ImageIcon
+  Image as ImageIcon,
+  Save,
+  Wand2,
 } from 'lucide-react';
 
 interface Video {
   id: string;
+  user_id: string;
   filename: string;
   original_filename: string;
   file_size: number;
@@ -35,6 +47,13 @@ interface Video {
   processed_date: string | null;
   error_message: string | null;
   frame_count: number;
+  segments: Array<{
+    id: string;
+    start_time: number;
+    end_time: number;
+    title: string | null;
+    status: string;
+  }>;
 }
 
 interface Frame {
@@ -45,6 +64,8 @@ interface Frame {
   is_scene_change: boolean;
 }
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+
 const statusConfig: Record<string, { label: string; color: string; icon: any }> = {
   uploaded: { label: 'Uploaded', color: 'bg-gray-500', icon: Clock },
   processing: { label: 'Processing', color: 'bg-blue-500', icon: Loader2 },
@@ -53,6 +74,12 @@ const statusConfig: Record<string, { label: string; color: string; icon: any }> 
   processed: { label: 'Ready', color: 'bg-green-500', icon: CheckCircle },
   error: { label: 'Error', color: 'bg-red-500', icon: AlertCircle },
 };
+
+// Segment colors for consistency
+const SEGMENT_COLORS = [
+  '#3B82F6', '#10B981', '#F59E0B', '#EF4444',
+  '#8B5CF6', '#EC4899', '#06B6D4', '#84CC16',
+];
 
 export default function VideoDetailPage() {
   const params = useParams();
@@ -63,7 +90,21 @@ export default function VideoDetailPage() {
   const [frames, setFrames] = useState<Frame[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [jobProgress, setJobProgress] = useState<{ progress: number; message: string } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [segments, setSegments] = useState<VideoSegment[]>([]);
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  const [initialSegmentsLoaded, setInitialSegmentsLoaded] = useState(false);
+
+  // SOP creation dialog
+  const [showSOPDialog, setShowSOPDialog] = useState(false);
+  const [sopSegment, setSOPSegment] = useState<VideoSegment | null>(null);
+  const [sopTitle, setSOPTitle] = useState('');
+  const [sopDescription, setSOPDescription] = useState('');
+  const [sopContext, setSOPContext] = useState('');
+  const [sopDetailLevel, setSOPDetailLevel] = useState('detailed');
+  const [sopMaxSteps, setSOPMaxSteps] = useState(50);
+  const [creatingSOPs, setCreatingSOPs] = useState(false);
+  const [createAllMode, setCreateAllMode] = useState(false);
 
   useEffect(() => {
     loadVideo();
@@ -79,10 +120,29 @@ export default function VideoDetailPage() {
     }
   }, [video?.status]);
 
-  const loadVideo = async () => {
+  const loadVideo = async (forceLoadSegments = false) => {
     try {
       const response = await videosApi.get(videoId);
       setVideo(response.data);
+
+      // Only load segments on initial load or when explicitly requested (after save)
+      // This prevents overwriting user's unsaved segment changes during polling
+      if (!initialSegmentsLoaded || forceLoadSegments) {
+        if (response.data.segments && response.data.segments.length > 0) {
+          const loadedSegments: VideoSegment[] = response.data.segments.map((seg: any, index: number) => ({
+            id: seg.id,
+            startTime: seg.start_time,
+            endTime: seg.end_time,
+            label: seg.title || `Segment ${index + 1}`,
+            color: SEGMENT_COLORS[index % SEGMENT_COLORS.length],
+          }));
+          setSegments(loadedSegments);
+        } else {
+          setSegments([]);
+        }
+        setInitialSegmentsLoaded(true);
+        setHasUnsavedChanges(false);
+      }
 
       // Load frames if processed
       if (response.data.status === 'processed') {
@@ -96,7 +156,98 @@ export default function VideoDetailPage() {
     }
   };
 
-  const handleCreateSOP = () => {
+  const handleSegmentsChange = useCallback((newSegments: VideoSegment[]) => {
+    setSegments(newSegments);
+    setHasUnsavedChanges(true);
+  }, []);
+
+  const handleSaveSegments = async () => {
+    setSaving(true);
+    try {
+      await videosApi.saveSegments(videoId, segments.map(s => ({
+        start_time: s.startTime,
+        end_time: s.endTime,
+        label: s.label,
+        color: s.color,
+      })));
+      setHasUnsavedChanges(false);
+      // Reload to get the new segment IDs from the server
+      await loadVideo(true);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to save segments');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCreateSOPFromSegment = (segment: VideoSegment) => {
+    setSOPSegment(segment);
+    setSOPTitle(segment.label);
+    setSOPDescription('');
+    setSOPContext('');
+    setCreateAllMode(false);
+    setShowSOPDialog(true);
+  };
+
+  const handleCreateAllSOPs = () => {
+    setSOPSegment(null);
+    setSOPTitle('');
+    setSOPDescription('');
+    setSOPContext('');
+    setCreateAllMode(true);
+    setShowSOPDialog(true);
+  };
+
+  const handleCreateSOP = async () => {
+    setCreatingSOPs(true);
+    try {
+      if (createAllMode) {
+        // Create SOP for each segment
+        for (const segment of segments) {
+          const createResponse = await sopsApi.create({
+            video_id: videoId,
+            title: segment.label,
+            description: sopDescription || undefined,
+            user_context: sopContext || undefined,
+            start_time: segment.startTime,
+            end_time: segment.endTime,
+          });
+
+          await sopsApi.generate(createResponse.data.id, {
+            detail_level: sopDetailLevel,
+            max_steps: sopMaxSteps,
+          });
+        }
+        // Navigate to SOPs list
+        router.push('/sops');
+      } else if (sopSegment) {
+        // Create single SOP
+        const createResponse = await sopsApi.create({
+          video_id: videoId,
+          title: sopTitle || sopSegment.label,
+          description: sopDescription || undefined,
+          user_context: sopContext || undefined,
+          start_time: sopSegment.startTime,
+          end_time: sopSegment.endTime,
+        });
+
+        await sopsApi.generate(createResponse.data.id, {
+          detail_level: sopDetailLevel,
+          max_steps: sopMaxSteps,
+        });
+
+        // Navigate to the new SOP
+        router.push(`/sops/${createResponse.data.id}`);
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to create SOP');
+    } finally {
+      setCreatingSOPs(false);
+      setShowSOPDialog(false);
+    }
+  };
+
+  const handleCreateSingleSOP = () => {
     router.push(`/sops/new?videoId=${videoId}`);
   };
 
@@ -136,6 +287,7 @@ export default function VideoDetailPage() {
 
   const status = statusConfig[video.status] || statusConfig.uploaded;
   const StatusIcon = status.icon;
+  const videoUrl = `${API_URL}/static/videos/${video.user_id}/${video.filename}`;
 
   return (
     <div className="p-8">
@@ -156,8 +308,8 @@ export default function VideoDetailPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Video Info */}
+      {/* Video Info Row */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
         <Card className="lg:col-span-2">
           <CardHeader>
             <CardTitle>Video Details</CardTitle>
@@ -242,10 +394,28 @@ export default function VideoDetailPage() {
               </Button>
             )}
             {video.status === 'processed' && (
-              <Button className="w-full" onClick={handleCreateSOP}>
-                <FileText className="h-4 w-4 mr-2" />
-                Create SOP
-              </Button>
+              <>
+                <Button className="w-full" onClick={handleCreateSingleSOP}>
+                  <FileText className="h-4 w-4 mr-2" />
+                  Create Single SOP
+                </Button>
+                {segments.length > 0 && (
+                  <Button className="w-full" variant="outline" onClick={handleCreateAllSOPs}>
+                    <Wand2 className="h-4 w-4 mr-2" />
+                    Create SOPs from All Segments ({segments.length})
+                  </Button>
+                )}
+                {hasUnsavedChanges && (
+                  <Button className="w-full" variant="secondary" onClick={handleSaveSegments} disabled={saving}>
+                    {saving ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Save className="h-4 w-4 mr-2" />
+                    )}
+                    Save Segments
+                  </Button>
+                )}
+              </>
             )}
             {['processing', 'metadata_extracted', 'scenes_detected'].includes(video.status) && (
               <Button className="w-full" disabled>
@@ -257,33 +427,166 @@ export default function VideoDetailPage() {
         </Card>
       </div>
 
-      {/* Extracted Frames */}
-      {video.status === 'processed' && frames.length > 0 && (
-        <Card className="mt-6">
+      {/* Multi-Segment Selector */}
+      {video.status === 'processed' && video.duration_seconds && (
+        <Card className="mb-6">
           <CardHeader>
-            <CardTitle>Extracted Frames ({frames.length} scene changes)</CardTitle>
+            <CardTitle>Video Segments</CardTitle>
+            <p className="text-sm text-gray-500">
+              Define multiple segments to create separate SOPs for different workflows in this recording.
+            </p>
           </CardHeader>
           <CardContent>
-            <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
-              {frames.map((frame) => (
+            <MultiSegmentSelector
+              videoUrl={videoUrl}
+              duration={video.duration_seconds}
+              segments={segments}
+              onSegmentsChange={handleSegmentsChange}
+              onCreateSOP={handleCreateSOPFromSegment}
+            />
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Extracted Frames */}
+      {video.status === 'processed' && frames.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Scene Changes ({frames.length})</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-3 md:grid-cols-5 lg:grid-cols-8 gap-2">
+              {frames.slice(0, 24).map((frame) => (
                 <div key={frame.id} className="relative group">
                   <img
-                    src={`${process.env.NEXT_PUBLIC_API_URL}/static/thumbnails/${videoId.split('-')[0]}/${videoId}/${frame.thumbnail_path?.split('/').pop()}`}
+                    src={`${API_URL}/static/thumbnails/${video.user_id}/${videoId}/${frame.thumbnail_path?.split('/').pop()}`}
                     alt={`Frame ${frame.frame_number}`}
-                    className="w-full aspect-video object-cover rounded-lg border"
+                    className="w-full aspect-video object-cover rounded border"
                     onError={(e) => {
-                      (e.target as HTMLImageElement).src = '/placeholder-frame.png';
+                      (e.target as HTMLImageElement).style.display = 'none';
                     }}
                   />
-                  <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-xs p-1 rounded-b-lg">
+                  <div className="absolute bottom-0 left-0 right-0 bg-black/60 text-white text-[10px] px-1 rounded-b">
                     {formatDuration(frame.timestamp_ms / 1000)}
                   </div>
                 </div>
               ))}
             </div>
+            {frames.length > 24 && (
+              <p className="text-sm text-gray-500 mt-2 text-center">
+                + {frames.length - 24} more frames
+              </p>
+            )}
           </CardContent>
         </Card>
       )}
+
+      {/* SOP Creation Dialog */}
+      <Dialog open={showSOPDialog} onOpenChange={setShowSOPDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {createAllMode ? `Create ${segments.length} SOPs from Segments` : 'Create SOP from Segment'}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {!createAllMode && sopSegment && (
+              <div className="space-y-2">
+                <Label htmlFor="title">SOP Title</Label>
+                <Input
+                  id="title"
+                  value={sopTitle}
+                  onChange={(e) => setSOPTitle(e.target.value)}
+                  placeholder="Enter SOP title..."
+                />
+                <p className="text-xs text-gray-500">
+                  Segment: {formatDuration(sopSegment.startTime)} - {formatDuration(sopSegment.endTime)}
+                </p>
+              </div>
+            )}
+
+            {createAllMode && (
+              <div className="p-3 bg-blue-50 rounded-lg text-sm">
+                <p className="font-medium text-blue-900 mb-1">Creating SOPs for:</p>
+                <ul className="text-blue-700 space-y-1">
+                  {segments.map((seg, i) => (
+                    <li key={seg.id}>
+                      {i + 1}. {seg.label} ({formatDuration(seg.startTime)} - {formatDuration(seg.endTime)})
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label htmlFor="description">Description (optional)</Label>
+              <Input
+                id="description"
+                value={sopDescription}
+                onChange={(e) => setSOPDescription(e.target.value)}
+                placeholder="Brief description..."
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="context">Context for AI (optional)</Label>
+              <textarea
+                id="context"
+                value={sopContext}
+                onChange={(e) => setSOPContext(e.target.value)}
+                placeholder="Describe what this video shows to help the AI..."
+                rows={3}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="detail">Detail Level</Label>
+                <select
+                  id="detail"
+                  value={sopDetailLevel}
+                  onChange={(e) => setSOPDetailLevel(e.target.value)}
+                  className="w-full h-10 rounded-md border border-input bg-background px-3 py-2 text-sm"
+                >
+                  <option value="brief">Brief</option>
+                  <option value="detailed">Detailed</option>
+                  <option value="comprehensive">Comprehensive</option>
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="steps">Max Steps</Label>
+                <Input
+                  id="steps"
+                  type="number"
+                  min={5}
+                  max={100}
+                  value={sopMaxSteps}
+                  onChange={(e) => setSOPMaxSteps(parseInt(e.target.value))}
+                />
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowSOPDialog(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateSOP} disabled={creatingSOPs}>
+              {creatingSOPs ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                <>
+                  <Wand2 className="h-4 w-4 mr-2" />
+                  {createAllMode ? `Create ${segments.length} SOPs` : 'Create SOP'}
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

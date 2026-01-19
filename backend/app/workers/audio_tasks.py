@@ -4,6 +4,7 @@ from uuid import UUID
 from app.workers.celery_app import celery_app
 from app.db.session import SyncSessionLocal
 from app.models.sop import SOP, SOPStep
+from app.models.audio import AudioFile
 from app.models.job import ProcessingJob
 from app.services.audio_transcriber import AudioTranscriber
 from app.services.claude_analyzer import ClaudeAnalyzer
@@ -18,6 +19,64 @@ def update_job_progress(job_id: str, progress: int, message: str):
             job.progress = progress
             job.progress_message = message
             db.commit()
+    finally:
+        db.close()
+
+
+@celery_app.task(bind=True)
+def transcribe_audio_file_task(
+    self,
+    audio_file_id: str,
+    audio_path: str,
+    language: str | None = None,
+):
+    """
+    Transcribe an audio file in the library.
+    This runs automatically after upload to prepare the audio for SOP generation.
+    """
+    db = SyncSessionLocal()
+
+    try:
+        # Get the audio file record
+        audio_file = db.query(AudioFile).filter(AudioFile.id == UUID(audio_file_id)).first()
+        if not audio_file:
+            raise ValueError(f"AudioFile not found: {audio_file_id}")
+
+        # Update status to transcribing
+        audio_file.transcription_status = "transcribing"
+        db.commit()
+
+        # Transcribe audio
+        transcriber = AudioTranscriber()
+        transcription = transcriber.transcribe(audio_path, language=language)
+
+        # Update audio file with transcript data
+        audio_file.transcript = transcription["text"]
+        audio_file.detected_language = transcription.get("language")
+        audio_file.duration_seconds = transcription.get("duration")
+        audio_file.transcription_status = "transcribed"
+        db.commit()
+
+        return {
+            "status": "completed",
+            "audio_file_id": audio_file_id,
+            "transcript_length": len(transcription["text"]),
+            "duration_seconds": transcription.get("duration"),
+            "detected_language": transcription.get("language"),
+        }
+
+    except Exception as e:
+        # Update status to error
+        audio_file = db.query(AudioFile).filter(AudioFile.id == UUID(audio_file_id)).first()
+        if audio_file:
+            audio_file.transcription_status = "error"
+            audio_file.audio_metadata = {
+                **audio_file.audio_metadata,
+                "transcription_error": str(e),
+            }
+            db.commit()
+        raise
+
     finally:
         db.close()
 
@@ -58,25 +117,53 @@ def generate_sop_from_audio_task(
         if not sop:
             raise ValueError(f"SOP not found: {sop_id}")
 
-        # Step 1: Transcribe audio (40%)
-        update_job_progress(job_id, 10, "Transcribing audio...")
+        # Check if we have an existing transcript from the AudioFile
+        audio_file_id = options.get("audio_file_id")
+        audio_file = None
+        transcript_text = None
+        audio_duration = None
+        detected_language = None
 
-        transcriber = AudioTranscriber()
-        transcription = transcriber.transcribe(
-            audio_path,
-            language=options.get("language"),
-        )
+        if audio_file_id:
+            audio_file = db.query(AudioFile).filter(AudioFile.id == UUID(audio_file_id)).first()
+            if audio_file and audio_file.transcription_status == "transcribed" and audio_file.transcript:
+                # Use existing transcript - skip transcription step
+                update_job_progress(job_id, 10, "Using existing transcript...")
+                transcript_text = audio_file.transcript
+                audio_duration = audio_file.duration_seconds
+                detected_language = audio_file.detected_language
+                update_job_progress(job_id, 40, f"Transcript loaded ({len(transcript_text)} characters)")
 
-        transcript_text = transcription["text"]
-        update_job_progress(job_id, 40, f"Transcription complete ({len(transcript_text)} characters)")
+        # If no existing transcript, transcribe now
+        if not transcript_text:
+            update_job_progress(job_id, 10, "Transcribing audio...")
+
+            transcriber = AudioTranscriber()
+            transcription = transcriber.transcribe(
+                audio_path,
+                language=options.get("language"),
+            )
+
+            transcript_text = transcription["text"]
+            audio_duration = transcription.get("duration")
+            detected_language = transcription.get("language")
+            update_job_progress(job_id, 40, f"Transcription complete ({len(transcript_text)} characters)")
+
+            # Update the AudioFile record if linked
+            if audio_file:
+                audio_file.transcript = transcript_text
+                audio_file.detected_language = detected_language
+                audio_file.duration_seconds = audio_duration
+                audio_file.transcription_status = "transcribed"
 
         # Store transcript in SOP metadata
         sop.generation_metadata = {
             **sop.generation_metadata,
             "transcript": transcript_text,
-            "audio_duration": transcription.get("duration"),
-            "detected_language": transcription.get("language"),
+            "audio_duration": audio_duration,
+            "detected_language": detected_language,
         }
+
         db.commit()
 
         # Step 2: Generate SOP from transcript (80%)

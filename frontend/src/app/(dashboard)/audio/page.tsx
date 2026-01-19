@@ -5,67 +5,98 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
-import { audioApi } from '@/lib/api';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { audioLibraryApi } from '@/lib/api';
 import { formatFileSize, formatDate } from '@/lib/utils';
-import type { AudioSOP } from '@/types';
-import { Plus, Trash2, Mic, FileText, Loader2 } from 'lucide-react';
+import type { AudioFile } from '@/types';
+import { Plus, Trash2, Mic, FileText, Loader2, Clock, Languages, FileAudio } from 'lucide-react';
 
 export default function AudioPage() {
   const router = useRouter();
-  const [audioSOPs, setAudioSOPs] = useState<AudioSOP[]>([]);
+  const [audioFiles, setAudioFiles] = useState<AudioFile[]>([]);
   const [loading, setLoading] = useState(true);
-  const [generatingId, setGeneratingId] = useState<string | null>(null);
+  const [selectedAudio, setSelectedAudio] = useState<AudioFile | null>(null);
+  const [showCreateSOPDialog, setShowCreateSOPDialog] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [sopTitle, setSOPTitle] = useState('');
+  const [sopDescription, setSOPDescription] = useState('');
+  const [userContext, setUserContext] = useState('');
 
   useEffect(() => {
-    loadAudioSOPs();
+    loadAudioFiles();
   }, []);
 
-  const loadAudioSOPs = async () => {
+  const loadAudioFiles = async () => {
     try {
-      const response = await audioApi.list();
-      setAudioSOPs(response.data.items);
+      const response = await audioLibraryApi.list();
+      setAudioFiles(response.data.items);
     } catch (error) {
-      console.error('Failed to load audio SOPs:', error);
+      console.error('Failed to load audio files:', error);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleDelete = async (sopId: string) => {
-    if (!confirm('Are you sure you want to delete this audio SOP?')) return;
+  const handleDelete = async (audioId: string) => {
+    if (!confirm('Are you sure you want to delete this audio file? SOPs created from it will not be deleted.')) return;
     try {
-      await audioApi.delete(sopId);
-      loadAudioSOPs();
+      await audioLibraryApi.delete(audioId);
+      loadAudioFiles();
     } catch (error) {
-      console.error('Failed to delete audio SOP:', error);
+      console.error('Failed to delete audio file:', error);
     }
   };
 
-  const handleGenerate = async (sopId: string) => {
-    setGeneratingId(sopId);
+  const openCreateSOPDialog = (audio: AudioFile) => {
+    setSelectedAudio(audio);
+    setSOPTitle(`SOP - ${audio.original_filename}`);
+    setSOPDescription('');
+    setUserContext('');
+    setShowCreateSOPDialog(true);
+  };
+
+  const handleCreateSOP = async () => {
+    if (!selectedAudio) return;
+
+    setCreating(true);
     try {
-      await audioApi.generate(sopId);
-      router.push(`/sops/${sopId}`);
+      const response = await audioLibraryApi.createSOP({
+        audio_file_id: selectedAudio.id,
+        title: sopTitle || undefined,
+        description: sopDescription || undefined,
+        user_context: userContext || undefined,
+        detail_level: 'detailed',
+      });
+
+      setShowCreateSOPDialog(false);
+      router.push(`/sops/${response.data.sop_id}`);
     } catch (error) {
-      console.error('Failed to generate SOP:', error);
-      setGeneratingId(null);
+      console.error('Failed to create SOP:', error);
+      setCreating(false);
     }
   };
 
-  const getStatusBadge = (status: string) => {
+  const getTranscriptionBadge = (status: string) => {
     const styles: Record<string, string> = {
-      pending_audio: 'bg-yellow-100 text-yellow-800',
-      generating: 'bg-blue-100 text-blue-800',
-      generated: 'bg-green-100 text-green-800',
-      completed: 'bg-green-100 text-green-800',
+      pending: 'bg-gray-100 text-gray-700',
+      transcribing: 'bg-blue-100 text-blue-800',
+      transcribed: 'bg-green-100 text-green-800',
       error: 'bg-red-100 text-red-800',
     };
     const labels: Record<string, string> = {
-      pending_audio: 'Pending',
-      generating: 'Generating',
-      generated: 'Generated',
-      completed: 'Completed',
+      pending: 'Not Transcribed',
+      transcribing: 'Transcribing',
+      transcribed: 'Transcribed',
       error: 'Error',
     };
     return (
@@ -73,6 +104,13 @@ export default function AudioPage() {
         {labels[status] || status}
       </span>
     );
+  };
+
+  const formatDuration = (seconds: number | null) => {
+    if (!seconds) return null;
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   if (loading) {
@@ -87,7 +125,7 @@ export default function AudioPage() {
     <div className="p-8">
       <div className="flex justify-between items-center mb-8">
         <div>
-          <h1 className="text-2xl font-bold">Audio</h1>
+          <h1 className="text-2xl font-bold">Audio Library</h1>
           <p className="text-gray-600">Upload and manage your audio recordings for SOP generation</p>
         </div>
         <Link href="/audio/upload">
@@ -98,7 +136,7 @@ export default function AudioPage() {
         </Link>
       </div>
 
-      {audioSOPs.length === 0 ? (
+      {audioFiles.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-16">
             <Mic className="h-16 w-16 text-gray-300 mb-4" />
@@ -114,85 +152,142 @@ export default function AudioPage() {
         </Card>
       ) : (
         <div className="grid gap-4">
-          {audioSOPs.map((audioSOP) => (
-            <Card key={audioSOP.id}>
+          {audioFiles.map((audio) => (
+            <Card key={audio.id}>
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center space-x-4">
                     <div className="w-12 h-12 bg-blue-50 rounded-lg flex items-center justify-center">
-                      <Mic className="h-6 w-6 text-blue-600" />
+                      <FileAudio className="h-6 w-6 text-blue-600" />
                     </div>
                     <div>
-                      <Link href={`/sops/${audioSOP.id}`} className="font-medium hover:text-blue-600">
-                        {audioSOP.title}
-                      </Link>
+                      <h3 className="font-medium">{audio.original_filename}</h3>
                       <div className="flex items-center space-x-4 mt-1 text-sm text-gray-500">
-                        {audioSOP.original_filename && (
-                          <span>{audioSOP.original_filename}</span>
+                        <span>{formatFileSize(audio.file_size)}</span>
+                        {audio.duration_seconds && (
+                          <span className="flex items-center">
+                            <Clock className="h-3 w-3 mr-1" />
+                            {formatDuration(audio.duration_seconds)}
+                          </span>
                         )}
-                        {audioSOP.file_size && (
-                          <span>{formatFileSize(audioSOP.file_size)}</span>
+                        {audio.detected_language && (
+                          <span className="flex items-center">
+                            <Languages className="h-3 w-3 mr-1" />
+                            {audio.detected_language.toUpperCase()}
+                          </span>
                         )}
-                        <span>{formatDate(audioSOP.created_at)}</span>
+                        <span>{formatDate(audio.upload_date)}</span>
                       </div>
                       <div className="mt-2 flex items-center space-x-2">
-                        {getStatusBadge(audioSOP.status)}
-                        {audioSOP.total_steps > 0 && (
-                          <span className="text-xs text-gray-500">
-                            {audioSOP.total_steps} steps
+                        {getTranscriptionBadge(audio.transcription_status)}
+                        {audio.sop_count > 0 && (
+                          <span className="text-xs text-gray-500 bg-gray-100 px-2 py-1 rounded-full">
+                            {audio.sop_count} SOP{audio.sop_count !== 1 ? 's' : ''} created
                           </span>
                         )}
                       </div>
                     </div>
                   </div>
                   <div className="flex items-center space-x-2">
-                    {audioSOP.status === 'pending_audio' && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleGenerate(audioSOP.id)}
-                        disabled={generatingId === audioSOP.id}
-                      >
-                        {generatingId === audioSOP.id ? (
-                          <Loader2 className="h-4 w-4 mr-1 animate-spin" />
-                        ) : (
-                          <FileText className="h-4 w-4 mr-1" />
-                        )}
-                        {generatingId === audioSOP.id ? 'Starting...' : 'Generate SOP'}
-                      </Button>
-                    )}
-                    {(audioSOP.status === 'generated' || audioSOP.status === 'completed') && (
-                      <Link href={`/sops/${audioSOP.id}`}>
-                        <Button variant="outline" size="sm">
-                          View SOP
-                        </Button>
-                      </Link>
-                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => openCreateSOPDialog(audio)}
+                    >
+                      <FileText className="h-4 w-4 mr-1" />
+                      Create SOP
+                    </Button>
                     <Button
                       variant="ghost"
                       size="icon"
-                      onClick={() => handleDelete(audioSOP.id)}
+                      onClick={() => handleDelete(audio.id)}
                       className="text-red-600 hover:text-red-700 hover:bg-red-50"
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
                   </div>
                 </div>
-
-                {audioSOP.status === 'generating' && (
-                  <div className="mt-4">
-                    <Progress value={50} />
-                    <p className="text-xs text-gray-500 mt-1 flex items-center">
-                      <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                      Generating SOP from audio...
-                    </p>
-                  </div>
-                )}
               </CardContent>
             </Card>
           ))}
         </div>
       )}
+
+      {/* Create SOP Dialog */}
+      <Dialog open={showCreateSOPDialog} onOpenChange={setShowCreateSOPDialog}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>Create SOP from Audio</DialogTitle>
+            <DialogDescription>
+              Generate a new Standard Operating Procedure from this audio file.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedAudio && (
+            <div className="space-y-4 py-4">
+              <div className="flex items-center space-x-3 p-3 bg-gray-50 rounded-lg">
+                <FileAudio className="h-8 w-8 text-blue-600" />
+                <div>
+                  <p className="font-medium text-sm">{selectedAudio.original_filename}</p>
+                  <p className="text-xs text-gray-500">
+                    {formatFileSize(selectedAudio.file_size)}
+                    {selectedAudio.duration_seconds && ` • ${formatDuration(selectedAudio.duration_seconds)}`}
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="title">SOP Title</Label>
+                <Input
+                  id="title"
+                  value={sopTitle}
+                  onChange={(e) => setSOPTitle(e.target.value)}
+                  placeholder="Enter a title for the SOP"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="description">Description (optional)</Label>
+                <Textarea
+                  id="description"
+                  value={sopDescription}
+                  onChange={(e) => setSOPDescription(e.target.value)}
+                  placeholder="Brief description of what this SOP covers"
+                  rows={2}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="context">Additional Context (optional)</Label>
+                <Textarea
+                  id="context"
+                  value={userContext}
+                  onChange={(e) => setUserContext(e.target.value)}
+                  placeholder="Any additional context to help AI understand the process better"
+                  rows={2}
+                />
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCreateSOPDialog(false)} disabled={creating}>
+              Cancel
+            </Button>
+            <Button onClick={handleCreateSOP} disabled={creating}>
+              {creating ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Creating...
+                </>
+              ) : (
+                <>
+                  <FileText className="h-4 w-4 mr-2" />
+                  Create SOP
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

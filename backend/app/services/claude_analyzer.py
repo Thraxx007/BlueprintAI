@@ -86,20 +86,29 @@ IMPORTANT: Respond ONLY with valid JSON, no other text."""
 
 {context}
 
-Analyze the following sequence of {len(images)} screenshots from a screen recording.
-Identify the steps/actions taken between frames.
+Analyze the following sequence of {len(images)} screenshots (numbered 0 to {len(images) - 1}) from a screen recording.
+Your task is to identify what actions the user took and create clear SOP steps.
+
+CRITICAL INSTRUCTIONS FOR FRAME SELECTION:
+- For each step, you must specify WHICH FRAME best shows where the user should look/click to perform that action
+- Choose the frame that shows the UI BEFORE the action is taken (so the user can see what to click)
+- If frame 0 shows a button and frame 1 shows the result after clicking, use frame_index: 0 for the "click button" step
+- The frame should show the element/area that needs to be interacted with
 
 For each step detected, provide:
-1. step_number: Sequential number
+1. step_number: Sequential number starting from 1
 2. title: Brief action title (e.g., "Click the New Project button")
-3. description: Detailed step description
-4. frame_index: Which frame (0-indexed) shows the result of this action
-5. click_location: If a click occurred, provide:
-   - x_percentage: horizontal position as percentage (0-100)
-   - y_percentage: vertical position as percentage (0-100)
-   - element_description: what was clicked
+3. description: Detailed step description explaining what to do and why
+4. frame_index: The frame (0 to {len(images) - 1}) that BEST SHOWS the UI element/area to interact with for this step. This should be the frame BEFORE the action occurs, showing where to click/type.
+5. click_location: If a click occurred, provide the location ON THE SELECTED FRAME where the click target is visible:
+   - x_percentage: horizontal position as percentage (0-100, where 0=left edge, 100=right edge)
+   - y_percentage: vertical position as percentage (0-100, where 0=top edge, 100=bottom edge)
+   - element_description: what element should be clicked
+   - action_description: what this click accomplishes
    - click_type: left_click, right_click, or double_click
 6. keyboard_input: Any text typed or shortcuts used (null if none)
+
+IMPORTANT: Each step's frame_index should point to the frame where the user can SEE the element they need to interact with. The click_location coordinates must accurately point to that element ON THAT FRAME.
 
 Respond in this exact JSON format:
 {{
@@ -112,7 +121,8 @@ Respond in this exact JSON format:
             "click_location": {{
                 "x_percentage": 45.5,
                 "y_percentage": 20.0,
-                "element_description": "New Project button",
+                "element_description": "New Project button in the toolbar",
+                "action_description": "Opens the new project dialog",
                 "click_type": "left_click"
             }},
             "keyboard_input": null

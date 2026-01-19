@@ -78,6 +78,11 @@ export const videosApi = {
   process: (id: string) => api.post(`/videos/${id}/process`),
   chop: (id: string, segments: Array<{ start_time: number; end_time: number; title?: string }>) =>
     api.post(`/videos/${id}/chop`, { segments }),
+  // Save segments (replaces existing segments)
+  saveSegments: (id: string, segments: Array<{ start_time: number; end_time: number; label?: string; title?: string; color?: string }>) =>
+    api.post(`/videos/${id}/segments`, { segments }),
+  // Get saved segments
+  getSegments: (id: string) => api.get(`/videos/${id}/segments`),
   getFrames: (id: string, sceneChangesOnly = false, page = 1, pageSize = 50) =>
     api.get(`/videos/${id}/frames?scene_changes_only=${sceneChangesOnly}&page=${page}&page_size=${pageSize}`),
 };
@@ -167,13 +172,49 @@ export const jobsApi = {
   cancel: (id: string) => api.delete(`/jobs/${id}`),
 };
 
-// Audio API
+// Audio Library API
+export const audioLibraryApi = {
+  // List audio files in the library
+  list: (page = 1, pageSize = 20) => {
+    return api.get(`/audio/library?page=${page}&page_size=${pageSize}`);
+  },
+  // Get a single audio file
+  get: (audioId: string) => api.get(`/audio/library/${audioId}`),
+  // Delete an audio file from the library
+  delete: (audioId: string) => api.delete(`/audio/library/${audioId}`),
+  // Upload audio to the library
+  upload: (file: File, onProgress?: (progress: number) => void) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    return api.post('/audio/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress: (event) => {
+        if (event.total && onProgress) {
+          onProgress(Math.round((event.loaded * 100) / event.total));
+        }
+      },
+    });
+  },
+  // Create an SOP from an audio file in the library
+  createSOP: (data: {
+    audio_file_id: string;
+    title?: string;
+    description?: string;
+    detail_level?: string;
+    language?: string;
+    user_context?: string;
+  }) => api.post('/audio/create-sop', data),
+};
+
+// Audio SOP API (for listing audio-based SOPs)
 export const audioApi = {
+  // List audio-based SOPs
   list: (page = 1, pageSize = 20, status?: string) => {
     let url = `/audio?page=${page}&page_size=${pageSize}`;
     if (status) url += `&status_filter=${status}`;
     return api.get(url);
   },
+  // Legacy upload (creates SOP directly)
   upload: (file: File, data?: { title?: string; description?: string; user_context?: string }, onProgress?: (progress: number) => void) => {
     const formData = new FormData();
     formData.append('file', file);
@@ -189,6 +230,7 @@ export const audioApi = {
       },
     });
   },
+  // Generate SOP from existing audio SOP record (legacy)
   generate: (sopId: string, options?: { detail_level?: string; language?: string; user_context?: string }) =>
     api.post(`/audio/${sopId}/generate`, options || {}),
   get: (sopId: string) => api.get(`/audio/${sopId}`),

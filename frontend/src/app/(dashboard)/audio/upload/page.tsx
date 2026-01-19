@@ -5,38 +5,25 @@ import { useRouter } from 'next/navigation';
 import { useDropzone } from 'react-dropzone';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Progress } from '@/components/ui/progress';
-import { audioApi } from '@/lib/api';
+import { audioLibraryApi } from '@/lib/api';
 import { formatFileSize } from '@/lib/utils';
 import { Upload, Mic, X, CheckCircle, AlertCircle } from 'lucide-react';
 
 export default function AudioUploadPage() {
   const router = useRouter();
   const [file, setFile] = useState<File | null>(null);
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [userContext, setUserContext] = useState('');
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
   const [uploaded, setUploaded] = useState(false);
-  const [sopId, setSopId] = useState('');
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
       setFile(acceptedFiles[0]);
       setError('');
-      // Auto-fill title from filename if empty
-      if (!title) {
-        const filename = acceptedFiles[0].name;
-        const nameWithoutExt = filename.replace(/\.[^/.]+$/, '');
-        setTitle(nameWithoutExt);
-      }
     }
-  }, [title]);
+  }, []);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -55,30 +42,12 @@ export default function AudioUploadPage() {
     setError('');
 
     try {
-      const response = await audioApi.upload(
-        file,
-        {
-          title: title || undefined,
-          description: description || undefined,
-          user_context: userContext || undefined,
-        },
-        (p) => setProgress(p)
-      );
-      setSopId(response.data.sop_id);
+      await audioLibraryApi.upload(file, (p) => setProgress(p));
       setUploaded(true);
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Upload failed');
     } finally {
       setUploading(false);
-    }
-  };
-
-  const handleGenerate = async () => {
-    try {
-      await audioApi.generate(sopId);
-      router.push(`/sops/${sopId}`);
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to start generation');
     }
   };
 
@@ -96,13 +65,17 @@ export default function AudioUploadPage() {
           <CardContent className="flex flex-col items-center justify-center py-16">
             <CheckCircle className="h-16 w-16 text-green-500 mb-4" />
             <h3 className="text-xl font-semibold mb-2">Upload Complete!</h3>
-            <p className="text-gray-500 mb-6">Your audio has been uploaded successfully</p>
+            <p className="text-gray-500 mb-6">Your audio has been added to the library</p>
             <div className="flex space-x-4">
-              <Button onClick={handleGenerate}>
-                Generate SOP
+              <Button onClick={() => router.push('/audio')}>
+                View Audio Library
               </Button>
-              <Button variant="outline" onClick={() => router.push('/audio')}>
-                View All Audio
+              <Button variant="outline" onClick={() => {
+                setFile(null);
+                setUploaded(false);
+                setProgress(0);
+              }}>
+                Upload Another
               </Button>
             </div>
           </CardContent>
@@ -115,7 +88,7 @@ export default function AudioUploadPage() {
     <div className="p-8 max-w-2xl mx-auto">
       <div className="mb-8">
         <h1 className="text-2xl font-bold">Upload Audio</h1>
-        <p className="text-gray-600">Upload an audio recording to create an SOP from spoken instructions</p>
+        <p className="text-gray-600">Upload audio recordings to your library to create SOPs later</p>
       </div>
 
       <Card>
@@ -156,41 +129,6 @@ export default function AudioUploadPage() {
                 )}
               </div>
 
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <Label htmlFor="title">Title</Label>
-                  <Input
-                    id="title"
-                    placeholder="SOP title"
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    disabled={uploading}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="description">Description (optional)</Label>
-                  <Textarea
-                    id="description"
-                    placeholder="Brief description of what this SOP covers"
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    disabled={uploading}
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="context">Additional Context (optional)</Label>
-                  <Textarea
-                    id="context"
-                    placeholder="Any additional context to help generate better SOP steps"
-                    value={userContext}
-                    onChange={(e) => setUserContext(e.target.value)}
-                    disabled={uploading}
-                  />
-                </div>
-              </div>
-
               {uploading && (
                 <div className="space-y-2">
                   <Progress value={progress} />
@@ -210,7 +148,7 @@ export default function AudioUploadPage() {
                 onClick={handleUpload}
                 disabled={uploading}
               >
-                {uploading ? 'Uploading...' : 'Upload Audio'}
+                {uploading ? 'Uploading...' : 'Upload to Library'}
               </Button>
             </>
           )}

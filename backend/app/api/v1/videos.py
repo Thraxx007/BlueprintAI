@@ -220,6 +220,49 @@ async def trigger_video_processing(
     }
 
 
+@router.post("/{video_id}/segments", response_model=list[VideoSegmentResponse])
+async def save_video_segments(
+    video_id: uuid.UUID,
+    request: VideoChopRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Save multiple segments for a video. This replaces any existing segments."""
+    query = select(Video).where(Video.id == video_id, Video.user_id == current_user.id)
+    result = await db.execute(query)
+    video = result.scalar_one_or_none()
+
+    if not video:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
+
+    # Delete existing segments
+    existing_segments = await db.execute(
+        select(VideoSegment).where(VideoSegment.video_id == video_id)
+    )
+    for seg in existing_segments.scalars().all():
+        await db.delete(seg)
+
+    # Create new segment records
+    segments = []
+    for i, seg in enumerate(request.segments):
+        # Use label as title if title not provided
+        title = seg.title or seg.label
+        segment = VideoSegment(
+            video_id=video_id,
+            segment_index=i,
+            start_time=seg.start_time,
+            end_time=seg.end_time,
+            title=title,
+            status="saved",
+        )
+        db.add(segment)
+        segments.append(segment)
+
+    await db.flush()
+
+    return [VideoSegmentResponse.model_validate(s) for s in segments]
+
+
 @router.post("/{video_id}/chop", response_model=list[VideoSegmentResponse])
 async def chop_video(
     video_id: uuid.UUID,
@@ -227,7 +270,7 @@ async def chop_video(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Split video into segments."""
+    """Split video into segments (legacy endpoint)."""
     query = select(Video).where(Video.id == video_id, Video.user_id == current_user.id)
     result = await db.execute(query)
     video = result.scalar_one_or_none()
@@ -238,21 +281,19 @@ async def chop_video(
     # Create segment records
     segments = []
     for i, seg in enumerate(request.segments):
+        title = seg.title or seg.label
         segment = VideoSegment(
             video_id=video_id,
             segment_index=i,
-            start_time=seg["start_time"],
-            end_time=seg["end_time"],
-            title=seg.get("title"),
+            start_time=seg.start_time,
+            end_time=seg.end_time,
+            title=title,
             status="pending",
         )
         db.add(segment)
         segments.append(segment)
 
     await db.flush()
-
-    # TODO: Queue chop task
-    # chop_video_task.delay(str(video_id), [s.model_dump() for s in request.segments])
 
     return [VideoSegmentResponse.model_validate(s) for s in segments]
 

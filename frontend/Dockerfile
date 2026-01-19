@@ -19,8 +19,9 @@ RUN mkdir -p public
 
 ENV NEXT_TELEMETRY_DISABLED 1
 
-# Set API URL for production build
-ENV NEXT_PUBLIC_API_URL=https://blueprintai-production-066d.up.railway.app
+# Set API URL for build (can be overridden via build arg)
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 RUN echo "Building with API URL: $NEXT_PUBLIC_API_URL" && npm run build
 

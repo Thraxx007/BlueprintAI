@@ -8,9 +8,9 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { videosApi, sopsApi, audioApi } from '@/lib/api';
 import type { Video } from '@/types';
-import { ArrowLeft, Loader2, Wand2, Video as VideoIcon, Mic, Upload, CheckCircle2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Wand2, Video as VideoIcon, Mic, Upload, CheckCircle2, Plus } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
-import { VideoSegmentSelector } from '@/components/video/VideoSegmentSelector';
+import { MultiSegmentSelector, VideoSegment } from '@/components/video/MultiSegmentSelector';
 
 type SourceType = 'video' | 'audio';
 
@@ -26,11 +26,12 @@ function NewSOPForm() {
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [creationProgress, setCreationProgress] = useState({ current: 0, total: 0 });
 
   // Video form state
   const [selectedVideoId, setSelectedVideoId] = useState(preselectedVideoId);
-  const [startTime, setStartTime] = useState<number | null>(null);
-  const [endTime, setEndTime] = useState<number | null>(null);
+  const [segments, setSegments] = useState<VideoSegment[]>([]);
+  const [useSegments, setUseSegments] = useState(false);
 
   // Audio form state
   const [audioFile, setAudioFile] = useState<File | null>(null);
@@ -54,10 +55,10 @@ function NewSOPForm() {
     }
   }, [preselectedVideoId]);
 
-  // Reset segment times when video changes
+  // Reset segments when video changes
   useEffect(() => {
-    setStartTime(null);
-    setEndTime(null);
+    setSegments([]);
+    setUseSegments(false);
   }, [selectedVideoId]);
 
   const loadVideos = async () => {
@@ -80,9 +81,8 @@ function NewSOPForm() {
 
   const videoUrl = useMemo(() => {
     if (!selectedVideo) return '';
-    // Build video URL - the backend serves files from storage
-    const filename = selectedVideo.filename;
-    return `${API_URL}/storage/videos/${selectedVideo.user_id}/${filename}`;
+    // Use the static file path - backend mounts storage at /static
+    return `${API_URL}/static/videos/${selectedVideo.user_id}/${selectedVideo.filename}`;
   }, [selectedVideo]);
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
@@ -100,41 +100,78 @@ function NewSOPForm() {
     maxSize: 25 * 1024 * 1024, // 25MB (Whisper API limit)
   });
 
-  const handleSegmentChange = useCallback((start: number | null, end: number | null) => {
-    setStartTime(start);
-    setEndTime(end);
+  const handleSegmentsChange = useCallback((newSegments: VideoSegment[]) => {
+    setSegments(newSegments);
   }, []);
 
   const handleCreateFromVideo = async () => {
-    if (!selectedVideoId || !title) {
-      alert('Please select a video and enter a title');
+    if (!selectedVideoId) {
+      alert('Please select a video');
+      return;
+    }
+
+    // If using segments, we need at least one segment
+    if (useSegments && segments.length === 0) {
+      alert('Please add at least one segment');
+      return;
+    }
+
+    // If not using segments, require a title
+    if (!useSegments && !title) {
+      alert('Please enter a title');
       return;
     }
 
     setCreating(true);
+
     try {
-      // Create SOP with optional segment times
-      const createResponse = await sopsApi.create({
-        video_id: selectedVideoId,
-        title,
-        description,
-        user_context: userContext,
-        start_time: startTime ?? undefined,
-        end_time: endTime ?? undefined,
-      });
+      if (useSegments && segments.length > 0) {
+        // Create multiple SOPs - one per segment
+        setCreationProgress({ current: 0, total: segments.length });
 
-      const sopId = createResponse.data.id;
+        for (let i = 0; i < segments.length; i++) {
+          const segment = segments[i];
+          setCreationProgress({ current: i + 1, total: segments.length });
 
-      // Start generation
-      await sopsApi.generate(sopId, {
-        detail_level: detailLevel,
-        max_steps: maxSteps,
-      });
+          const createResponse = await sopsApi.create({
+            video_id: selectedVideoId,
+            title: segment.label,
+            description: description || undefined,
+            user_context: userContext || undefined,
+            start_time: segment.startTime,
+            end_time: segment.endTime,
+          });
 
-      router.push(`/sops/${sopId}`);
+          await sopsApi.generate(createResponse.data.id, {
+            detail_level: detailLevel,
+            max_steps: maxSteps,
+          });
+        }
+
+        // Navigate to SOPs list when done with multiple
+        router.push('/sops');
+      } else {
+        // Create single SOP (full video)
+        const createResponse = await sopsApi.create({
+          video_id: selectedVideoId,
+          title,
+          description: description || undefined,
+          user_context: userContext || undefined,
+        });
+
+        const sopId = createResponse.data.id;
+
+        await sopsApi.generate(sopId, {
+          detail_level: detailLevel,
+          max_steps: maxSteps,
+        });
+
+        router.push(`/sops/${sopId}`);
+      }
     } catch (error: any) {
       alert(error.response?.data?.detail || 'Failed to create SOP');
       setCreating(false);
+      setCreationProgress({ current: 0, total: 0 });
     }
   };
 
@@ -180,7 +217,7 @@ function NewSOPForm() {
   };
 
   const isValid = sourceType === 'video'
-    ? selectedVideoId && title
+    ? selectedVideoId && (useSegments ? segments.length > 0 : title)
     : audioFile && title;
 
   if (loading) {
@@ -192,7 +229,7 @@ function NewSOPForm() {
   }
 
   return (
-    <div className="p-8 max-w-3xl mx-auto">
+    <div className="p-8 max-w-4xl mx-auto">
       <Button variant="ghost" onClick={() => router.back()} className="mb-4">
         <ArrowLeft className="h-4 w-4 mr-2" />
         Back
@@ -264,16 +301,66 @@ function NewSOPForm() {
                 )}
               </div>
 
-              {/* Video Segment Selector */}
+              {/* Segment Mode Toggle */}
               {selectedVideo && selectedVideo.duration_seconds && (
-                <div className="space-y-2">
-                  <VideoSegmentSelector
+                <div className="flex items-center gap-3">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={useSegments}
+                      onChange={(e) => setUseSegments(e.target.checked)}
+                      className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span className="text-sm font-medium">Select specific segments (create multiple SOPs)</span>
+                  </label>
+                </div>
+              )}
+
+              {/* Multi-Segment Selector */}
+              {selectedVideo && selectedVideo.duration_seconds && useSegments && (
+                <div className="space-y-2 border rounded-lg p-4 bg-gray-50">
+                  <MultiSegmentSelector
                     videoUrl={videoUrl}
                     duration={selectedVideo.duration_seconds}
-                    onSegmentChange={handleSegmentChange}
-                    initialStartTime={startTime ?? undefined}
-                    initialEndTime={endTime ?? undefined}
+                    segments={segments}
+                    onSegmentsChange={handleSegmentsChange}
                   />
+                </div>
+              )}
+
+              {/* Title (only when not using segments) */}
+              {!useSegments && (
+                <div className="space-y-2">
+                  <Label htmlFor="title">SOP Title *</Label>
+                  <Input
+                    id="title"
+                    placeholder="e.g., How to Create a New Project"
+                    value={title}
+                    onChange={(e) => setTitle(e.target.value)}
+                  />
+                </div>
+              )}
+
+              {/* Segments Summary */}
+              {useSegments && segments.length > 0 && (
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm">
+                  <p className="text-blue-800 font-medium mb-2">
+                    {segments.length} SOP{segments.length > 1 ? 's' : ''} will be created:
+                  </p>
+                  <ul className="space-y-1 text-blue-700">
+                    {segments.map((seg, i) => (
+                      <li key={seg.id} className="flex items-center gap-2">
+                        <div
+                          className="w-2 h-2 rounded-full"
+                          style={{ backgroundColor: seg.color }}
+                        />
+                        <span>{seg.label}</span>
+                        <span className="text-blue-500 text-xs">
+                          ({Math.floor(seg.startTime / 60)}:{Math.floor(seg.startTime % 60).toString().padStart(2, '0')} - {Math.floor(seg.endTime / 60)}:{Math.floor(seg.endTime % 60).toString().padStart(2, '0')})
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
             </>
@@ -281,71 +368,73 @@ function NewSOPForm() {
 
           {/* Audio Upload */}
           {sourceType === 'audio' && (
-            <div className="space-y-2">
-              <Label>Upload Audio File</Label>
-              <div
-                {...getRootProps()}
-                className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
-                  isDragActive
-                    ? 'border-blue-500 bg-blue-50'
-                    : audioFile
-                    ? 'border-green-500 bg-green-50'
-                    : 'border-gray-300 hover:border-gray-400'
-                }`}
-              >
-                <input {...getInputProps()} />
-                {audioFile ? (
-                  <div className="flex flex-col items-center">
-                    <CheckCircle2 className="h-10 w-10 text-green-600 mb-2" />
-                    <p className="font-medium text-green-700">{audioFile.name}</p>
-                    <p className="text-sm text-gray-500 mt-1">
-                      {(audioFile.size / 1024 / 1024).toFixed(2)} MB
-                    </p>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setAudioFile(null);
-                      }}
-                      className="text-sm text-gray-500 hover:text-gray-700 mt-2 underline"
-                    >
-                      Remove
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center">
-                    <Upload className="h-10 w-10 text-gray-400 mb-2" />
-                    <p className="text-gray-600">
-                      {isDragActive
-                        ? 'Drop the audio file here...'
-                        : 'Drag & drop an audio file, or click to select'}
-                    </p>
-                    <p className="text-sm text-gray-400 mt-1">
-                      MP3, WAV, M4A, OGG, or WebM (max 25MB)
-                    </p>
-                  </div>
-                )}
+            <>
+              <div className="space-y-2">
+                <Label>Upload Audio File</Label>
+                <div
+                  {...getRootProps()}
+                  className={`border-2 border-dashed rounded-lg p-8 text-center cursor-pointer transition-colors ${
+                    isDragActive
+                      ? 'border-blue-500 bg-blue-50'
+                      : audioFile
+                      ? 'border-green-500 bg-green-50'
+                      : 'border-gray-300 hover:border-gray-400'
+                  }`}
+                >
+                  <input {...getInputProps()} />
+                  {audioFile ? (
+                    <div className="flex flex-col items-center">
+                      <CheckCircle2 className="h-10 w-10 text-green-600 mb-2" />
+                      <p className="font-medium text-green-700">{audioFile.name}</p>
+                      <p className="text-sm text-gray-500 mt-1">
+                        {(audioFile.size / 1024 / 1024).toFixed(2)} MB
+                      </p>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setAudioFile(null);
+                        }}
+                        className="text-sm text-gray-500 hover:text-gray-700 mt-2 underline"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center">
+                      <Upload className="h-10 w-10 text-gray-400 mb-2" />
+                      <p className="text-gray-600">
+                        {isDragActive
+                          ? 'Drop the audio file here...'
+                          : 'Drag & drop an audio file, or click to select'}
+                      </p>
+                      <p className="text-sm text-gray-400 mt-1">
+                        MP3, WAV, M4A, OGG, or WebM (max 25MB)
+                      </p>
+                    </div>
+                  )}
+                </div>
+                <p className="text-xs text-gray-500">
+                  Your audio will be transcribed and analyzed to create SOP steps.
+                </p>
               </div>
-              <p className="text-xs text-gray-500">
-                Your audio will be transcribed and analyzed to create SOP steps.
-              </p>
-            </div>
-          )}
 
-          {/* Title */}
-          <div className="space-y-2">
-            <Label htmlFor="title">SOP Title *</Label>
-            <Input
-              id="title"
-              placeholder="e.g., How to Create a New Project"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
-          </div>
+              {/* Title for Audio */}
+              <div className="space-y-2">
+                <Label htmlFor="title">SOP Title *</Label>
+                <Input
+                  id="title"
+                  placeholder="e.g., How to Create a New Project"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                />
+              </div>
+            </>
+          )}
 
           {/* Description */}
           <div className="space-y-2">
-            <Label htmlFor="description">Description</Label>
+            <Label htmlFor="description">Description (optional)</Label>
             <Input
               id="description"
               placeholder="Brief description of what this SOP covers"
@@ -356,7 +445,7 @@ function NewSOPForm() {
 
           {/* User Context */}
           <div className="space-y-2">
-            <Label htmlFor="context">Context for AI</Label>
+            <Label htmlFor="context">Context for AI (optional)</Label>
             <textarea
               id="context"
               placeholder={
@@ -391,7 +480,7 @@ function NewSOPForm() {
             </div>
             {sourceType === 'video' ? (
               <div className="space-y-2">
-                <Label htmlFor="steps">Max Steps</Label>
+                <Label htmlFor="steps">Max Steps per SOP</Label>
                 <Input
                   id="steps"
                   type="number"
@@ -425,20 +514,6 @@ function NewSOPForm() {
             )}
           </div>
 
-          {/* Segment Info Summary */}
-          {sourceType === 'video' && selectedVideo && startTime !== null && endTime !== null && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 text-sm">
-              <p className="text-blue-800">
-                <strong>Selected Segment:</strong>{' '}
-                {Math.floor(startTime / 60)}:{Math.floor(startTime % 60).toString().padStart(2, '0')} - {Math.floor(endTime / 60)}:{Math.floor(endTime % 60).toString().padStart(2, '0')}{' '}
-                ({Math.floor((endTime - startTime) / 60)}:{Math.floor((endTime - startTime) % 60).toString().padStart(2, '0')} duration)
-              </p>
-              <p className="text-blue-600 text-xs mt-1">
-                Only frames within this segment will be analyzed for SOP generation.
-              </p>
-            </div>
-          )}
-
           {/* Upload Progress */}
           {creating && sourceType === 'audio' && uploadProgress > 0 && uploadProgress < 100 && (
             <div className="space-y-2">
@@ -455,6 +530,22 @@ function NewSOPForm() {
             </div>
           )}
 
+          {/* Creation Progress (for multiple SOPs) */}
+          {creating && creationProgress.total > 0 && (
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span>Creating SOP {creationProgress.current} of {creationProgress.total}...</span>
+                <span>{Math.round((creationProgress.current / creationProgress.total) * 100)}%</span>
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2">
+                <div
+                  className="bg-blue-600 h-2 rounded-full transition-all"
+                  style={{ width: `${(creationProgress.current / creationProgress.total) * 100}%` }}
+                ></div>
+              </div>
+            </div>
+          )}
+
           <Button
             className="w-full"
             onClick={handleCreate}
@@ -465,12 +556,16 @@ function NewSOPForm() {
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 {sourceType === 'audio' && uploadProgress < 100
                   ? 'Uploading...'
+                  : creationProgress.total > 0
+                  ? `Creating SOP ${creationProgress.current}/${creationProgress.total}...`
                   : 'Creating SOP...'}
               </>
             ) : (
               <>
                 <Wand2 className="h-4 w-4 mr-2" />
-                Generate SOP
+                {useSegments && segments.length > 0
+                  ? `Generate ${segments.length} SOP${segments.length > 1 ? 's' : ''}`
+                  : 'Generate SOP'}
               </>
             )}
           </Button>

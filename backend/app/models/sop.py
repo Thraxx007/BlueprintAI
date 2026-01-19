@@ -17,6 +17,9 @@ class SOP(Base):
     video_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("videos.id", ondelete="SET NULL"), index=True
     )
+    audio_file_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("audio_files.id", ondelete="SET NULL"), index=True
+    )
     segment_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("video_segments.id", ondelete="SET NULL")
     )
@@ -42,6 +45,7 @@ class SOP(Base):
     # Relationships
     user: Mapped["User"] = relationship(back_populates="sops")
     video: Mapped["Video | None"] = relationship(back_populates="sops")
+    audio_file: Mapped["AudioFile | None"] = relationship(back_populates="sops")
     segment: Mapped["VideoSegment | None"] = relationship(back_populates="sops")
     steps: Mapped[list["SOPStep"]] = relationship(
         back_populates="sop", cascade="all, delete-orphan", order_by="SOPStep.step_number"
@@ -109,4 +113,5 @@ class ClickAnnotation(Base):
 # Forward references
 from app.models.user import User
 from app.models.video import Video, VideoSegment, Frame
+from app.models.audio import AudioFile
 from app.models.export import Export
